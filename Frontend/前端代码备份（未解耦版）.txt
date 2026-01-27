@@ -1,0 +1,1102 @@
+<template>
+  <div class="home-container">
+    <!-- 左侧导航栏 -->
+    <el-aside width="240px" class="sidebar">
+      <div class="sidebar-title">分拣管理系统</div>
+      <div class="sidebar-btn-group">
+        <el-button 
+          type="primary" 
+          class="filter-btn"
+          @click="switchModule('order')"
+          :class="{ active: activeModule === 'order' }"
+        >
+          订单管理
+        </el-button>
+        <el-button 
+          type="primary" 
+          class="filter-btn"
+          @click="switchModule('category')"
+          :class="{ active: activeModule === 'category' }"
+        >
+          类别管理
+        </el-button>
+      </div>
+    </el-aside>
+
+    <!-- 右侧主内容区 -->
+    <el-main class="main-content">
+      <!-- 初始欢迎界面 -->
+      <div v-if="activeModule === 'init'" class="empty-state">
+        <el-empty description="欢迎使用智能分拣管理系统，请点击左侧「订单管理」开始操作" />
+      </div>
+
+      <!-- 订单管理模块 -->
+      <div v-if="activeModule === 'order'" class="filter-content">
+        <!-- 日期/类别/增减补筛选条件区域 -->
+        <div class="filter-form-area">
+          <!-- 回退按钮 -->
+          <div 
+            class="back-btn" 
+            v-if="uploadFile || selectedDate"
+            @click="openBackConfirmDialog"
+          >
+            <el-icon><ArrowLeft /></el-icon>
+          </div>
+
+          <el-form inline class="filter-form">
+            <el-form-item label="配送日期：">
+              <el-select 
+                v-model="selectedDate" 
+                placeholder="请先上传Excel文件获取日期" 
+                style="width: 180px;"
+                :disabled="!dateList.length"
+                @change="filterExcelData"
+              >
+                <el-option
+                  v-for="date in dateList"
+                  :key="date"
+                  :label="date"
+                  :value="date"
+                />
+              </el-select>
+            </el-form-item>
+
+            <el-form-item label="食材类别：" style="margin-left: 20px;">
+              <el-select 
+                v-model="selectedCategory" 
+                placeholder="请选择食材类别" 
+                style="width: 180px;"
+                :disabled="!excelMappedCategories.length"
+                @change="filterExcelData"
+              >
+                <el-option
+                  v-for="cate in excelMappedCategories"
+                  :key="cate"
+                  :label="cate"
+                  :value="cate"
+                />
+              </el-select>
+            </el-form-item>
+
+            <!-- 填入增减补：勾选框前置+间距缩小 -->
+            <el-form-item>
+              <el-checkbox 
+                v-model="isShowAdjustColumn"
+                style="margin-top: 5px;"
+              />
+              <span style="margin-left: 2px;">填入增减补</span>
+            </el-form-item>
+
+            <el-form-item>
+              <!-- 下载按钮 -->
+              <el-button 
+                type="primary" 
+                @click="handleFilterAndDownload"
+                :disabled="!uploadFile || !dateList.length || !selectedDate"
+              >
+                下载
+              </el-button>
+              <el-button 
+                @click="resetFilter" 
+                style="margin-left: 10px;"
+                :disabled="!selectedDate && !selectedCategory && !isShowAdjustColumn"
+              >
+                清空条件
+              </el-button>
+            </el-form-item>
+          </el-form>
+        </div>
+
+        <!-- 预览区域 -->
+        <div 
+          class="preview-area" 
+          @drop="handleDrop" 
+          @dragover="handleDragOver" 
+          @dragleave="handleDragLeave" 
+          :class="{ active: isDragActive }"
+        >
+          <!-- 未上传Excel时显示上传提示 -->
+          <div class="upload-tip" v-if="!uploadFile">
+            <el-upload
+              class="upload-excel"
+              drag
+              action="#"
+              :auto-upload="false"
+              :on-change="handleFileChange"
+              accept=".xlsx,.xls"
+            >
+              <i class="el-icon-upload"></i>
+              <div class="el-upload__text">将Excel文件拖到此处，或<em>点击上传</em></div>
+              <div class="el-upload__tip" slot="tip">仅支持.xlsx/.xls格式文件</div>
+            </el-upload>
+          </div>
+
+          <!-- 上传Excel后显示实时预览表格 -->
+          <div class="excel-preview" v-else>
+            <div class="preview-title">Excel数据预览（筛选条件：{{ filterDesc }}）</div>
+            <el-table 
+              :data="filteredExcelData" 
+              border 
+              stripe 
+              :height="previewTableHeight"
+              :empty-text="filteredExcelData.length === 0 ? '暂无匹配数据' : ''"
+              :cell-style="{padding: '2px 0'}"
+              style="width: 100%;"
+            >
+              <!-- 固定基础列 -->
+              <el-table-column prop="食堂名称" label="食堂名称" align="center" min-width="100" />
+              <el-table-column prop="配送日期" label="配送日期" align="center" min-width="100" />
+              <el-table-column prop="食材类别" label="食材类别" align="center" min-width="100" />
+              <el-table-column prop="食材名称" label="食材名称" align="center" min-width="120" />
+              <el-table-column prop="规格" label="规格" align="center" min-width="80" />
+              <el-table-column prop="单位" label="单位" align="center" min-width="60" />
+              <el-table-column prop="数量" label="数量" align="center" min-width="80" />
+              <el-table-column prop="订单备注" label="订单备注" align="center" min-width="150" show-overflow-tooltip />
+              <!-- 实时增减补列 -->
+              <el-table-column 
+                label="实时增减补" 
+                align="center" 
+                min-width="100"
+              >
+                <template #default="scope">
+                  <el-input
+                    v-model.trim="scope.row.实时增减补"
+                    size="mini"
+                    placeholder="+7/-20/0"
+                    @input="handleAdjustInput(scope.row)"
+                    maxlength="8"
+                    style="width: 90px; margin: 0 auto;"
+                    clearable
+                  />
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </div>
+      </div>
+
+      <!-- 类别管理模块 -->
+      <div v-if="activeModule === 'category'" class="category-management">
+        <!-- 类别图标列表 -->
+        <div class="category-icon-grid">
+          <div 
+            class="category-icon"
+            v-for="(category, index) in categoryList"
+            :key="index"
+            @click="openCategoryDialog(category)"
+          >
+            <span class="category-icon-name">{{ category.name }}</span>
+            <span class="category-icon-count">{{ category.foods.length }}种</span>
+          </div>
+          <div v-if="!categoryList.length" class="empty-tip">暂无类别，点击右下角+添加</div>
+        </div>
+
+        <!-- 悬浮新增按钮 -->
+        <div class="add-category-btn" @click="openAddCategory">
+          <el-icon size="24"><Plus /></el-icon>
+        </div>
+
+        <!-- 新增/编辑弹窗（已补全闭合标签） -->
+        <el-dialog
+          v-model="showCategoryDialog"
+          :title="editingCategoryIndex === -1 ? '新增食材类别' : '编辑食材类别'"
+          width="500px"
+          :close-on-click-modal="false"
+          :close-on-press-escape="false"
+          center
+          class="category-dialog"
+        >
+          <div class="category-form-wrap">
+            <div class="form-item">
+              <label class="form-label">类别名：</label>
+              <el-input 
+                v-model="categoryName" 
+                placeholder="请输入类别名（如：蔬菜、肉类）"
+                class="form-input"
+              ></el-input>
+            </div>
+            <div class="form-item">
+              <label class="form-label">食品名：</label>
+              <div class="food-input-container">
+                <div 
+                  class="food-input-item" 
+                  v-for="(food, idx) in foodList" 
+                  :key="idx"
+                >
+                  <el-input 
+                    v-model="foodList[idx]" 
+                    placeholder="请输入食品名（如：西红柿、猪肉）"
+                    class="form-input food-input"
+                    :class="{ 'error-input': isFoodDuplicate(food, idx) }"
+                  ></el-input>
+                  <el-button 
+                    type="text" 
+                    @click="removeFood(idx)"
+                    v-if="foodList.length > 1"
+                    class="del-btn"
+                  >
+                    <el-icon color="#f56c6c"><Minus /></el-icon>
+                  </el-button>
+                  <div 
+                    v-if="isFoodDuplicate(food, idx)" 
+                    class="duplicate-tip"
+                  >
+                    {{ getDuplicateTip(food, idx) }}
+                  </div>
+                </div>
+                <el-button 
+                  type="text" 
+                  @click="addFood"
+                  class="add-food-btn"
+                >
+                  <el-icon color="#409eff"><Plus /></el-icon> 添加食品名
+                </el-button>
+              </div>
+            </div>
+          </div>
+          <template #footer>
+            <el-button 
+              type="primary" 
+              @click="saveCurrentCategory"
+              :disabled="!categoryName.trim() || foodList.every(f => !f.trim())"
+            >
+              确认
+            </el-button>
+            <el-button @click="showCategoryDialog = false">取消</el-button>
+            <el-button 
+              type="danger" 
+              @click="deleteCurrentCategory"
+              v-if="editingCategoryIndex !== -1"
+            >
+              删除
+            </el-button>
+          </template>
+        </el-dialog> <!-- 关键修复：补全el-dialog闭合标签 -->
+      </div>
+
+      <!-- 回退确认弹窗 -->
+      <el-dialog
+        v-model="showBackDialog"
+        title="确认回退"
+        width="400px"
+        :close-on-click-modal="false"
+        :close-on-press-escape="false"
+      >
+        <div class="dialog-content">
+          若选择确认后本次修改失效，回退到选择文件界面
+        </div>
+        <template #footer>
+          <el-button @click="showBackDialog = false">取消</el-button>
+          <el-button type="primary" @click="confirmBack">确认</el-button>
+        </template>
+      </el-dialog>
+
+      <!-- 食材未映射提示弹窗 -->
+      <el-dialog
+        v-model="showUnmappedTip"
+        title="食材名称未映射"
+        width="500px"
+        :close-on-click-modal="false"
+        :close-on-press-escape="false"
+        @close="handleUnmappedDialogClose"
+      >
+        <div class="unmapped-tip">
+          <p>检测到以下食材名称未关联到任何类别，请先去类别管理模块添加：</p>
+          <div class="unmapped-list">
+            <span v-for="(food, idx) in unmappedFoods" :key="idx">{{ food }}</span>
+          </div>
+        </div>
+        <template #footer>
+          <el-button type="primary" @click="gotoCategoryModule()">前往类别管理</el-button>
+        </template>
+      </el-dialog>
+    </el-main>
+  </div>
+</template>
+
+<script setup>
+import { ref, computed, watch, onMounted, nextTick } from 'vue'
+import { ElMessage, ElMessageBox, ElIcon } from 'element-plus'
+import { ArrowLeft, Plus, Minus } from '@element-plus/icons-vue'
+import * as XLSX from 'xlsx'
+
+// 核心状态
+const activeModule = ref('init') 
+const selectedDate = ref('') 
+const selectedCategory = ref('')
+const dateList = ref([])
+const isDragActive = ref(false)
+const uploadFile = ref(null)
+const isShowAdjustColumn = ref(false)
+const showBackDialog = ref(false)
+const originExcelData = ref([]) 
+const filteredExcelData = ref([]) 
+const excelMappedCategories = ref([]) 
+const FIXED_HEADERS = ['食堂名称', '配送日期', '食材类别', '食材名称', '规格', '单位', '数量', '订单备注']
+const FIXED_HEADERS_WITH_ADJUST = [...FIXED_HEADERS, '实时增减补']
+const previewTableHeight = ref('350px')
+const categoryList = ref([])
+const showCategoryDialog = ref(false)
+const editingCategoryIndex = ref(-1)
+const categoryName = ref('')
+const foodList = ref([''])
+const showUnmappedTip = ref(false)
+const unmappedFoods = ref([])
+
+// 本地存储
+const loadCategoryData = () => {
+  const saved = localStorage.getItem('foodCategoryData')
+  if (saved) {
+    try {
+      categoryList.value = JSON.parse(saved)
+    } catch (e) {
+      categoryList.value = []
+      localStorage.removeItem('foodCategoryData')
+    }
+  }
+}
+const saveCategoryData = () => {
+  localStorage.setItem('foodCategoryData', JSON.stringify(categoryList.value))
+}
+
+// 类别管理方法
+const openAddCategory = () => {
+  categoryName.value = ''
+  foodList.value = ['']
+  editingCategoryIndex.value = -1
+  showCategoryDialog.value = true
+}
+const openCategoryDialog = (category) => {
+  categoryName.value = category.name
+  foodList.value = [...category.foods]
+  editingCategoryIndex.value = categoryList.value.findIndex(item => item.name === category.name)
+  showCategoryDialog.value = true
+}
+const addFood = () => {
+  const lastFood = foodList.value[foodList.value.length - 1]
+  if (lastFood.trim()) {
+    foodList.value.push('')
+  } else {
+    ElMessage.warning('请先填写上一个食品名！')
+  }
+}
+const removeFood = (idx) => {
+  foodList.value.splice(idx, 1)
+  if (foodList.value.length === 0) {
+    foodList.value.push('')
+  }
+}
+const isFoodDuplicate = (food, currentIdx) => {
+  const trimedFood = food.trim()
+  if (!trimedFood) return false
+  const sameInForm = foodList.value.some((f, idx) => idx !== currentIdx && f.trim() === trimedFood)
+  if (sameInForm) return true
+  const sameInOtherCate = categoryList.value.some((cate, cateIdx) => cateIdx !== editingCategoryIndex.value && cate.foods.some(f => f.trim() === trimedFood))
+  return sameInOtherCate
+}
+const getDuplicateTip = (food, currentIdx) => {
+  const trimedFood = food.trim()
+  if (!trimedFood) return ''
+  const sameInForm = foodList.value.some((f, idx) => idx !== currentIdx && f.trim() === trimedFood)
+  if (sameInForm) return `❌ 当前表单内食品名重复`
+  const duplicateCate = categoryList.value.find((cate, cateIdx) => {
+    return cateIdx !== editingCategoryIndex.value && cate.foods.some(f => f.trim() === trimedFood)
+  })
+  if (duplicateCate) return `❌ 该食品名已存在于${duplicateCate.name}类别`
+  return ''
+}
+const saveCurrentCategory = () => {
+  const trimName = categoryName.value.trim()
+  const validFoods = foodList.value.map(f => f.trim()).filter(f => f)
+  const uniqueValidFoods = [...new Set(validFoods)]
+  if (!trimName) {
+    ElMessage.error('类别名不能为空！')
+    return
+  }
+  if (validFoods.length === 0) {
+    ElMessage.error('请至少添加一个有效食品名！')
+    return
+  }
+  const nameDuplicate = categoryList.value.some((item, idx) => idx !== editingCategoryIndex.value && item.name.trim() === trimName)
+  if (nameDuplicate) {
+    ElMessage.error('该类别名已存在，请更换！')
+    return
+  }
+  if (editingCategoryIndex.value === -1) {
+    categoryList.value.push({ name: trimName, foods: uniqueValidFoods })
+    ElMessage.success('类别新增成功！')
+  } else {
+    categoryList.value[editingCategoryIndex.value] = { name: trimName, foods: uniqueValidFoods }
+    ElMessage.success('类别修改成功！')
+  }
+  saveCategoryData()
+  showCategoryDialog.value = false
+}
+const deleteCurrentCategory = () => {
+  ElMessageBox.confirm(
+    '确定要删除该类别吗？删除后关联的食材映射会失效！',
+    '确认删除',
+    { type: 'warning' }
+  ).then(() => {
+    categoryList.value.splice(editingCategoryIndex.value, 1)
+    saveCategoryData()
+    showCategoryDialog.value = false
+    ElMessage.success('类别删除成功！')
+  })
+}
+
+// 模块切换
+const switchModule = (module) => {
+  activeModule.value = module
+  if (module === 'order') {
+    resetToImportView()
+    nextTick(() => calcPreviewHeight())
+  }
+  if (module === 'category') {
+    showCategoryDialog.value = false
+  }
+}
+
+// 表格高度计算
+const calcPreviewHeight = () => {
+  if (activeModule.value !== 'order') return
+  const filterArea = document.querySelector('.filter-form-area')
+  const filterHeight = filterArea ? filterArea.offsetHeight : 0
+  const mainContent = document.querySelector('.main-content')
+  const mainHeight = mainContent ? mainContent.offsetHeight : 0
+  const previewHeight = mainHeight - filterHeight - 50
+  previewTableHeight.value = `${previewHeight - 40}px`
+  
+  const previewArea = document.querySelector('.preview-area')
+  if (previewArea) {
+    previewArea.style.height = `${previewHeight}px`
+    const uploadTip = document.querySelector('.upload-tip')
+    if (uploadTip) uploadTip.style.height = `${previewHeight - 20}px`
+  }
+}
+
+// 拖拽/上传
+const handleDragOver = (e) => {
+  e.preventDefault()
+  e.stopPropagation()
+  isDragActive.value = true
+}
+const handleDragLeave = (e) => {
+  e.preventDefault()
+  e.stopPropagation()
+  isDragActive.value = false
+}
+const handleDrop = (e) => {
+  e.preventDefault()
+  e.stopPropagation()
+  isDragActive.value = false
+  const files = e.dataTransfer.files
+  if (files.length) {
+    const file = files[0]
+    if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+      uploadFile.value = file
+      parseExcelFile(file)
+    } else {
+      ElMessage.error('请上传.xlsx/.xls格式文件！')
+    }
+  }
+}
+const handleFileChange = (file) => {
+  uploadFile.value = file.raw
+  parseExcelFile(file.raw)
+}
+
+// Excel解析
+const parseExcelFile = (file) => {
+  try {
+    ElMessage.info('正在解析Excel文件，请稍等...')
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const data = new Uint8Array(e.target.result)
+      const workbook = XLSX.read(data, { type: 'array' })
+      const worksheet = workbook.Sheets[workbook.SheetNames[0]]
+      const originData = XLSX.utils.sheet_to_json(worksheet)
+      
+      if (originData.length === 0) {
+        ElMessage.error('Excel文件无数据！')
+        return
+      }
+
+      const formattedData = formatExcelData(originData)
+      if (formattedData.length === 0) {
+        ElMessage.warning('Excel中无有效数据，请检查核心列！')
+        return
+      }
+
+      const checkResult = checkFoodMapping(formattedData)
+      if (!checkResult.isAllMapped) {
+        unmappedFoods.value = checkResult.unmapped
+        showUnmappedTip.value = true
+        return
+      }
+
+      originExcelData.value = formattedData.map(item => ({
+        ...item,
+        原始数量: item.数量,
+        实时增减补: '',
+        食材类别: item.食材类别
+      }))
+      filteredExcelData.value = [...originExcelData.value]
+
+      extractAndProcessDeliveryDate(formattedData)
+      const cateSet = new Set(formattedData.map(item => item.食材类别).filter(Boolean))
+      excelMappedCategories.value = Array.from(cateSet).sort()
+
+      ElMessage.success('Excel解析成功！')
+    }
+    reader.readAsArrayBuffer(file)
+  } catch (error) {
+    console.error('Excel解析失败：', error)
+    ElMessage.error('Excel解析失败，请检查文件格式！')
+  }
+}
+
+// 格式化Excel数据
+const formatExcelData = (originData) => {
+  return originData.map(item => {
+    const foodRemark = item['食材备注'] || ''
+    const orderRemark = item['订单备注'] || ''
+    const mergeRemark = [foodRemark, orderRemark].filter(Boolean).join('；')
+    const foodName = (item['食材名称'] || '').trim()
+    const category = categoryList.value.find(c => c.foods.some(f => f.trim() === foodName))
+
+    return {
+      '食堂名称': item['食堂名称'] || '',
+      '配送日期': item['配送日期'] || item['日期'] || '',
+      '食材名称': item['食材名称'] || '',
+      '食材类别': category ? category.name : '',
+      '规格': item['规格'] || '',
+      '单位': item['单位'] || '',
+      '数量': Number(item['数量']) || 0,
+      '订单备注': mergeRemark || ''
+    }
+  }).filter(item => {
+    return item['食堂名称'] || item['配送日期']
+  })
+}
+
+// 食材映射校验
+const checkFoodMapping = (formattedData) => {
+  const allFoods = formattedData.map(item => item['食材名称'].trim()).filter(Boolean)
+  if (allFoods.length === 0) {
+    ElMessage.warning('Excel中未检测到有效食材名称！')
+    return { isAllMapped: true, unmapped: [] }
+  }
+  const uniqueExcelFoods = [...new Set(allFoods)]
+  const mappedFoods = [...new Set(categoryList.value.flatMap(item => item.foods.map(f => f.trim())))]
+  const unmapped = uniqueExcelFoods.filter(food => food && !mappedFoods.includes(food))
+  return { isAllMapped: unmapped.length === 0, unmapped }
+}
+
+// 提取配送日期
+const extractAndProcessDeliveryDate = (data) => {
+  const dateSet = new Set()
+  data.forEach(item => {
+    if (item['配送日期']) dateSet.add(item['配送日期'])
+  })
+  const dateArray = Array.from(dateSet).filter(Boolean)
+  dateArray.sort((a, b) => new Date(a) - new Date(b))
+  dateList.value = dateArray
+}
+
+// 增减补处理
+const handleAdjustInput = (row) => {
+  const adjustValue = row.实时增减补
+  if (adjustValue) {
+    const reg = /^0$|^[+-]\d*(\.\d*)?$/
+    if (!reg.test(adjustValue)) {
+      ElMessage.warning('增减补格式错误！仅支持0、+数字、-数字')
+      row.实时增减补 = ''
+    }
+  }
+}
+
+// 筛选逻辑
+const filterExcelData = () => {
+  if (originExcelData.value.length === 0) return
+  let filtered = [...originExcelData.value]
+  if (selectedDate.value) {
+    filtered = filtered.filter(item => item['配送日期'] === selectedDate.value)
+  }
+  if (selectedCategory.value) {
+    filtered = filtered.filter(item => item['食材类别'] === selectedCategory.value)
+  }
+  filteredExcelData.value = filtered
+}
+
+// 导出数据
+const getExportData = () => {
+  const exportData = []
+  for (const row of filteredExcelData.value) {
+    const baseItem = {
+      '食堂名称': row['食堂名称'],
+      '配送日期': row['配送日期'],
+      '食材类别': row['食材类别'],
+      '食材名称': row['食材名称'],
+      '规格': row['规格'],
+      '单位': row['单位'],
+      '数量': row['原始数量'],
+      '订单备注': row['订单备注']
+    }
+
+    if (isShowAdjustColumn.value) {
+      exportData.push({
+        ...baseItem,
+        '实时增减补': row['实时增减补'] || ''
+      })
+    } else {
+      const adjustValue = row['实时增减补'].trim()
+      let finalQty = row['原始数量'] || 0
+
+      if (adjustValue === '0') {
+        finalQty = 0
+      } else if (adjustValue) {
+        const num = Number(adjustValue)
+        if (!isNaN(num)) finalQty += num
+      }
+      finalQty = Math.max(0, finalQty)
+      baseItem.数量 = finalQty
+      exportData.push(baseItem)
+    }
+  }
+  return exportData
+}
+
+// 下载
+const handleFilterAndDownload = () => {
+  if (!selectedDate.value) {
+    ElMessage.warning('请选择配送日期！')
+    return
+  }
+  if (filteredExcelData.value.length === 0) {
+    ElMessage.warning('暂无匹配数据，无法下载！')
+    return
+  }
+
+  try {
+    ElMessage.info('正在生成Excel文件，请稍等...')
+    const exportData = getExportData()
+    const exportHeaders = isShowAdjustColumn.value ? FIXED_HEADERS_WITH_ADJUST : FIXED_HEADERS
+
+    const worksheet = XLSX.utils.json_to_sheet(exportData, {
+      header: exportHeaders,
+      skipHeader: false
+    })
+    worksheet['!cols'] = exportHeaders.map(header => {
+      return { wch: header === '订单备注' ? 25 : header === '实时增减补' ? 12 : 15 }
+    })
+
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, `筛选数据_${selectedDate.value}`)
+    const fileName = `配送日期_${selectedDate.value}_分拣数据.xlsx`
+    XLSX.writeFile(workbook, fileName)
+
+    ElMessage.success(`下载成功！文件名为：${fileName}`)
+  } catch (error) {
+    console.error('Excel下载失败：', error)
+    ElMessage.error('下载失败，请重试！')
+  }
+}
+
+// 清空条件
+const resetFilter = () => {
+  selectedDate.value = ''
+  selectedCategory.value = ''
+  isShowAdjustColumn.value = false
+  filteredExcelData.value = [...originExcelData.value]
+  ElMessage.info('已清空筛选条件，保留实时增减补数据，恢复全量数据预览')
+}
+
+// 回退逻辑
+const openBackConfirmDialog = () => {
+  showBackDialog.value = true
+}
+const confirmBack = () => {
+  showBackDialog.value = false
+  uploadFile.value = null
+  selectedDate.value = ''
+  selectedCategory.value = ''
+  isShowAdjustColumn.value = false
+  dateList.value = []
+  originExcelData.value = []
+  filteredExcelData.value = []
+  excelMappedCategories.value = []
+  ElMessage.success('已回退到选择文件界面，本次修改已失效')
+}
+const resetToImportView = () => {
+  uploadFile.value = null
+  isDragActive.value = false
+  selectedDate.value = ''
+  selectedCategory.value = ''
+  isShowAdjustColumn.value = false
+  dateList.value = []
+  originExcelData.value = []
+  filteredExcelData.value = []
+  excelMappedCategories.value = []
+  showUnmappedTip.value = false
+  unmappedFoods.value = []
+}
+
+// 弹窗处理
+const handleUnmappedDialogClose = () => {
+  resetToImportView()
+  ElMessage.info('请完善类别映射后重新上传Excel')
+}
+const gotoCategoryModule = () => {
+  showUnmappedTip.value = false
+  resetToImportView()
+  switchModule('category')
+}
+
+// 监听和初始化
+onMounted(() => {
+  loadCategoryData()
+  calcPreviewHeight()
+  window.addEventListener('resize', calcPreviewHeight)
+})
+watch(activeModule, () => {
+  setTimeout(calcPreviewHeight, 100)
+})
+watch([selectedDate, selectedCategory], () => {
+  filterExcelData()
+})
+
+// 筛选条件描述
+const filterDesc = computed(() => {
+  let desc = ''
+  if (selectedDate.value) {
+    desc += `配送日期：${selectedDate.value}`
+  }
+  if (selectedCategory.value) {
+    desc += `${desc ? ' | ' : ''}食材类别：${selectedCategory.value}`
+  }
+  if (isShowAdjustColumn.value) {
+    desc += `${desc ? ' | ' : ''}填入增减补列`
+  }
+  return desc || '全部数据'
+})
+</script>
+
+<style scoped>
+.home-container {
+  display: flex;
+  height: 100vh;
+  width: 100%;
+  overflow: hidden;
+}
+
+.sidebar {
+  background-color: #f5f7fa;
+  padding: 20px 10px;
+  border-right: 1px solid #e6e6e6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.sidebar-title {
+  font-size: 18px;
+  font-weight: bold;
+  color: #303133;
+  margin-bottom: 30px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #e6e6e6;
+  width: 100%;
+  text-align: center;
+}
+
+.sidebar-btn-group {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 15px;
+  padding: 0 10px;
+}
+
+.filter-btn {
+  width: 180px;
+  height: 40px;
+  font-size: 14px;
+  margin: 0 !important;
+  transition: all 0.3s;
+}
+.filter-btn.active {
+  background-color: #1989fa;
+  border-color: #1989fa;
+}
+
+.main-content {
+  flex: 1;
+  padding: 20px;
+  background-color: #f9f9f9;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.empty-state {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.filter-form-area {
+  margin-bottom: 30px;
+  padding: 20px;
+  background: #fff;
+  border-radius: 6px;
+  box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.04);
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.back-btn {
+  position: static;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background-color: #f5f7fa;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 16px;
+  color: #409eff;
+  transition: all 0.3s;
+  margin-right: 20px;
+  flex-shrink: 0;
+}
+.back-btn:hover {
+  background-color: #e8f4ff;
+  color: #1989fa;
+  transform: scale(1.1);
+}
+
+.filter-form {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 15px;
+  flex: 1;
+  margin: 0;
+}
+
+.preview-area {
+  border: 2px dashed #dcdfe6;
+  border-radius: 6px;
+  background-color: #fff;
+  transition: all 0.3s;
+  padding: 10px;
+  width: 100%;
+}
+.preview-area.active {
+  border-color: #409eff;
+  background-color: #f0f8ff;
+}
+
+.upload-tip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+.excel-preview {
+  width: 100%;
+  height: 100%;
+}
+
+.preview-title {
+  font-size: 14px;
+  color: #606266;
+  margin-bottom: 10px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid #e6e6e6;
+}
+
+:deep(.el-table) { width: 100% !important; }
+:deep(.el-table__header-wrapper), :deep(.el-table__body-wrapper) { width: 100% !important; }
+:deep(.el-table__cell) {
+  padding: 4px 0 !important;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+:deep(.el-input--mini) { --el-input-height: 28px !important; }
+:deep(.el-input__inner) {
+  text-align: center;
+  padding: 0 8px !important;
+}
+:deep(.el-checkbox) { margin-top: 3px !important; }
+
+.dialog-content {
+  font-size: 14px;
+  color: #606266;
+  line-height: 1.6;
+  margin-bottom: 10px;
+  text-align: center;
+}
+
+.category-management {
+  width: 100%;
+  height: 100%;
+  background-color: #fff;
+  border-radius: 6px;
+  padding: 20px;
+  box-sizing: border-box;
+  position: relative;
+  overflow-y: auto;
+}
+.category-icon-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 20px;
+  width: 100%;
+  padding: 10px 0;
+}
+.category-icon {
+  width: 100%;
+  aspect-ratio: 1/1;
+  background-color: #e8f4ff;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.3s;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+.category-icon:hover {
+  background-color: #409eff;
+  color: #fff;
+  transform: translateY(-5px);
+}
+.category-icon-name {
+  font-size: 16px;
+  font-weight: bold;
+  margin-bottom: 5px;
+}
+.category-icon-count {
+  font-size: 12px;
+  color: #606266;
+}
+.category-icon:hover .category-icon-count { color: #fff; }
+.empty-tip {
+  grid-column: 1 / -1;
+  text-align: center;
+  color: #909399;
+  font-size: 14px;
+  margin-top: 50px;
+}
+.add-category-btn {
+  position: fixed;
+  right: 30px;
+  bottom: 30px;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: #409eff;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.3);
+  transition: all 0.3s;
+  z-index: 10;
+}
+.add-category-btn:hover {
+  background: #1989fa;
+  transform: scale(1.1);
+}
+
+:deep(.category-dialog .el-dialog__body) {
+  padding: 20px 30px !important;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+.category-form-wrap {
+  width: 100%;
+  max-width: 400px;
+}
+.form-item {
+  width: 100%;
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.form-label {
+  font-size: 14px;
+  color: #303133;
+  font-weight: 500;
+  width: 100%;
+}
+.form-input {
+  width: 100% !important;
+  --el-input-height: 40px !important;
+}
+.food-input-container {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.food-input-item {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.food-input { width: 100% !important; }
+.del-btn { align-self: flex-start; padding: 0 !important; }
+.add-food-btn { align-self: flex-start; padding: 0 !important; margin-top: 4px; }
+.duplicate-tip {
+  font-size: 12px;
+  color: #f56c6c;
+  line-height: 1.4;
+  padding-left: 4px;
+}
+.error-input {
+  --el-input-border-color: #f56c6c !important;
+  --el-input-hover-border-color: #f56c6c !important;
+}
+
+.unmapped-tip { padding: 10px 0; }
+.unmapped-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.unmapped-list span {
+  background: #fef0f0;
+  color: #f56c6c;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+@media (max-width: 768px) {
+  .category-icon-grid {
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    gap: 15px;
+  }
+  .add-category-btn {
+    width: 50px;
+    height: 50px;
+    right: 20px;
+    bottom: 20px;
+  }
+}
+</style>

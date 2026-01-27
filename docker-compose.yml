@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  # Django后端服务
+  backend:
+    build: ./Backend  # 指向Backend目录的Dockerfile
+    container_name: django_food_backend
+    restart: always
+    ports:
+      - "8000:8000"  # 映射8000端口（Django默认）
+    volumes:
+      - ./Backend:/app  # 挂载本地代码，改代码实时同步
+      # 持久化SQLite数据库（删容器不丢数据）
+      - ./Backend/db.sqlite3:/app/db.sqlite3
+    networks:
+      - food_system_network
+
+frontend:
+  build: ./Frontend/admin_platform
+  container_name: vue_food_frontend
+  restart: always
+  ports:
+    - "5174:5174"  # 本地访问
+    - "5175:5175"  # 远程访问
+  volumes:
+    - ./Frontend/admin_platform:/app
+    - /app/node_modules
+  networks:
+    - food_system_network
+  depends_on:
+    - backend
+  # 启动两个前端服务（可选，也可手动启动）
+  command: sh -c "npm run dev:local & npm run dev:remote"
+
+# 自定义网络（容器间通信）
+networks:
+  food_system_network:
+    driver: bridge
