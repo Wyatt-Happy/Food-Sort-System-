@@ -25,9 +25,10 @@ SECRET_KEY = 'django-insecure-^0+j2%jr91kwx8sdviw1p++&@^ble7#r*-bhip^9*u!hpbmjv0
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-# ========== 核心修复1：允许后端外网访问 ==========
+# ========== 核心修复1：允许所有必要域名（包含HTTPS前端域名） ==========
 ALLOWED_HOSTS = [
-    "3f7748e1.r10.cpolar.top",  # 后端内网穿透域名
+    "3f7748e1.r10.cpolar.top",  # 后端内网穿透域名（HTTPS/HTTP）
+    "16d0a48d.r10.cpolar.top",  # 前端内网穿透域名（新增！关键）
     "localhost",
     "127.0.0.1",
     "0.0.0.0",
@@ -45,6 +46,7 @@ INSTALLED_APPS = [
     
     # 已有的应用
     'category.apps.CategoryConfig',
+    'orders.apps.OrdersConfig',
     'corsheaders',  # 跨域应用
     
     # 新增：注册 DRF
@@ -58,7 +60,7 @@ MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',  # 保留CSRF中间件（不注释）
+    'django.middleware.csrf.CsrfViewMiddleware',  # 恢复CSRF中间件（取消注释）
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
@@ -125,19 +127,21 @@ STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 
-# ========== 核心修复2：跨域配置（适配HTTPS/HTTP） ==========
+# ========== 核心修复2：跨域配置（适配HTTPS/HTTP，精准匹配） ==========
 # 允许携带Cookie（CSRF Token核心）
 CORS_ALLOW_CREDENTIALS = True
 
-# 允许的跨域源（精准匹配前端域名，包含端口）
+# 允许的跨域源（去掉端口！cpolar的HTTPS映射默认用443端口，无需加5174）
 CORS_ALLOWED_ORIGINS = [
-    "http://16d0a48d.r10.cpolar.top:5174",  # 前端HTTP域名
-    "https://16d0a48d.r10.cpolar.top:5174", # 前端HTTPS域名（新增）
+    "http://16d0a48d.r10.cpolar.top",   # 前端HTTP（无端口）
+    "https://16d0a48d.r10.cpolar.top",  # 前端HTTPS（无端口，新增！关键）
+    "http://3f7748e1.r10.cpolar.top",   # 后端HTTP（无端口）
+    "https://3f7748e1.r10.cpolar.top",  # 后端HTTPS（无端口，新增！关键）
     "http://localhost:5174",
     "http://127.0.0.1:5174",
 ]
 
-# 允许的请求头（包含HTTPS环境的CSRF Token头）
+# 允许所有请求头（覆盖HTTPS环境的所有场景）
 CORS_ALLOW_HEADERS = [
     "X-CSRFToken",
     "Content-Type",
@@ -145,47 +149,47 @@ CORS_ALLOW_HEADERS = [
     "Origin",
     "Referer",
     "X-Requested-With",
+    "Accept",
+    "Accept-Encoding",
+    "User-Agent",
 ]
 
-# 允许的请求方法
+# 允许所有请求方法
 CORS_ALLOW_METHODS = [
     "GET",
     "POST",
     "PUT",
     "DELETE",
     "OPTIONS",
+    "PATCH",
 ]
 
-# ========== 核心修复3：CSRF配置（解决HTTPS 403） ==========
-# 1. CSRF信任的源（包含HTTPS/HTTP的前端/后端域名）
+# ========== 核心修复3：CSRF配置（适配HTTPS跨域） ==========
+# 1. CSRF信任的源（去掉端口，包含所有HTTPS/HTTP域名）
 CSRF_TRUSTED_ORIGINS = [
-    "http://16d0a48d.r10.cpolar.top:5174",   # 前端HTTP
-    "https://16d0a48d.r10.cpolar.top:5174",  # 前端HTTPS（新增）
-    "http://3f7748e1.r10.cpolar.top",        # 后端HTTP
-    "https://3f7748e1.r10.cpolar.top",       # 后端HTTPS（新增）
+    "http://16d0a48d.r10.cpolar.top",   # 前端HTTP（无端口）
+    "https://16d0a48d.r10.cpolar.top",  # 前端HTTPS（无端口，新增！关键）
+    "http://3f7748e1.r10.cpolar.top",   # 后端HTTP（无端口）
+    "https://3f7748e1.r10.cpolar.top",  # 后端HTTPS（无端口，新增！关键）
     "http://localhost:5174",
+    "http://127.0.0.1:5174",
 ]
 
-# 2. 关闭HTTPS强制Cookie（关键！适配内网穿透的HTTP环境）
-CSRF_COOKIE_SECURE = False  # HTTPS环境设为True，HTTP设为False
-SESSION_COOKIE_SECURE = False  # 同步关闭Session的HTTPS强制
+# 2. HTTPS环境下开启Cookie的Secure（关键！适配cpolar的HTTPS）
+CSRF_COOKIE_SECURE = True   # HTTPS必须设为True
+SESSION_COOKIE_SECURE = True  # 同步开启
 
-# 3. 关闭SameSite严格模式（避免HTTPS下Cookie被拦截）
-CSRF_COOKIE_SAMESITE = 'None'  # HTTPS必须设为None，HTTP设为Lax
-SESSION_COOKIE_SAMESITE = 'None'
+# 3. SameSite设为Lax（None在部分浏览器会被拦截，Lax兼容性更好）
+CSRF_COOKIE_SAMESITE = 'Lax'
+SESSION_COOKIE_SAMESITE = 'Lax'
 
-# 4. 允许CSRF Cookie跨域（适配内网穿透）
-CSRF_COOKIE_DOMAIN = None  # 本地开发设为None，生产环境填后端域名
-SESSION_COOKIE_DOMAIN = None
+# 4. 取消自定义CSRF失败视图，用默认配置
+# CSRF_FAILURE_VIEW = 'django.views.csrf.csrf_failure'
 
-# 5. 禁用CSRF的HTTP Referer验证（HTTPS下Referer可能丢失）
-CSRF_FAILURE_VIEW = 'django.views.csrf.csrf_failure'  # 保留默认失败视图
-# settings.py 末尾（确保位置正确）
+# ========== DRF配置（关闭权限验证，避免干扰） ==========
 REST_FRAMEWORK = {
-    # 确认配置无误（复制粘贴以下内容）
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.AllowAny',
     ],
-    # 可选：关闭认证（彻底排除认证因素）
     'DEFAULT_AUTHENTICATION_CLASSES': [],
 }

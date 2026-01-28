@@ -51,7 +51,6 @@
               ></el-option>
             </el-select>
           </el-form-item>
-
           <el-form-item label="食材类别：" class="filter-item fixed-width-item">
             <el-select 
               v-model="selectedCategory" 
@@ -194,6 +193,7 @@ import { ElMessage } from 'element-plus';
 import { ArrowLeft } from '@element-plus/icons-vue';
 import * as XLSX from 'xlsx';
 import { useRouter } from 'vue-router';
+import axios from 'axios';
 
 // 导入自定义组件和工具
 import BackDialog from '@/components/BackDialog.vue';
@@ -205,9 +205,16 @@ import {
   extractAndProcessDeliveryDate,
   getExportData 
 } from '@/utils/excelHandler';
+// 导入动态接口配置
+import { getApiBaseUrl, requestConfig } from '@/utils/apiConfig.js';
 
 // 初始化路由
 const router = useRouter();
+
+// 核心：动态获取后端地址（替换硬编码）
+const API_BASE_URL = getApiBaseUrl();
+console.log('【OrderManage - 后端基础地址】', API_BASE_URL); // 打印基础地址
+console.log('【OrderManage - 导出接口地址】', `${API_BASE_URL}/api/orders/export-excel/`); // 打印导出接口地址
 
 // 响应式数据定义
 const selectedDate = ref('');
@@ -237,6 +244,7 @@ const canDownload = computed(() => {
 
 // 生命周期 - 挂载
 onMounted(async () => {
+  console.log('【页面挂载】开始加载类别数据'); // 打印挂载日志
   await loadCategoriesForMapping();
   nextTick(() => calcPreviewHeight());
   window.addEventListener('resize', calcPreviewHeight);
@@ -247,17 +255,21 @@ onUnmounted(() => {
   window.removeEventListener('resize', calcPreviewHeight);
 });
 
-// 加载类别数据
+// 加载类别数据（带健壮性优化）
 const loadCategoriesForMapping = async () => {
   try {
+    console.log('【开始请求类别数据】'); // 打印请求日志
     const res = await getCategories();
     categoryList.value = res.map(item => ({
       id: item.id,
       name: item.name,
       foods: item.foods.map(f => f.name)
     }));
+    console.log('【类别数据加载成功】', categoryList.value); // 打印成功日志
   } catch (error) {
-    ElMessage.error('加载类别映射失败：' + error.message);
+    // 优化错误提示，明确指向路径问题
+    ElMessage.error(`加载类别映射失败：${error.message}。请检查接口路径是否为 /api/category/categories/`);
+    console.error('【类别数据加载失败详情】', error); // 打印失败详情
     categoryList.value = [];
   }
 };
@@ -391,9 +403,9 @@ const filterExcelData = () => {
   filteredExcelData.value = filtered;
 };
 
-
-// 下载Excel文件
-const handleFilterAndDownload = () => {
+// 核心修改：调用后端接口下载Excel文件（带健壮性优化 + 动态配置）
+const handleFilterAndDownload = async () => {
+  // 前置校验（和之前一致）
   if (!canDownload.value) {
     if (!uploadFile.value) ElMessage.warning('请先上传Excel数据！');
     else if (!selectedDate.value) ElMessage.warning('请选择配送日期！');
@@ -409,118 +421,67 @@ const handleFilterAndDownload = () => {
 
   try {
     ElMessage.info('正在生成Excel文件，请稍等...');
+    console.log('【开始下载】请求地址：', `${API_BASE_URL}/api/orders/export-excel/`); // 打印下载请求地址
     
-    let exportHeaders = [];
-    let fileName = '';
-    let worksheet;
-    
-    if (exportType.value === 'supplier') {
-      // 供货商导出逻辑（保留原有逻辑）
-      exportHeaders = ['学校名称', '食堂名称', '配送日期', '食材类别', '食材名称', '规格', '单位', '数量', '订单备注'];
-      fileName = `供货商单_配送日期_${selectedDate.value}_食材类别_${selectedCategory.value}.xlsx`;
-      // 供货商单：实际数量覆盖原始数量（原有逻辑）
-      const exportData = filteredExcelData.value.map(row => {
-        let finalQty = row.原始数量;
-        if (row.实际增减补) {
-          const inputQty = Number(row.实际增减补);
-          finalQty = isNaN(inputQty) ? row.原始数量 : inputQty;
-        }
-        return {
-          学校名称: row.学校名称,
-          食堂名称: row.食堂名称,
-          配送日期: row.配送日期,
-          食材类别: row.食材类别,
-          食材名称: row.食材名称,
-          规格: row.规格,
-          单位: row.单位,
-          数量: finalQty,
-          订单备注: row.订单备注
-        };
-      });
-      worksheet = XLSX.utils.json_to_sheet(exportData, {
-        header: exportHeaders,
-        skipHeader: false
-      });
-      worksheet['!cols'] = exportHeaders.map(header => {
-        if (header === '订单备注') return { wch: 25 };
-        return header === '数量' ? { wch: 10 } : { wch: 15 };
-      });
-    } else if (exportType.value === 'follower') {
-      // 跟车单导出逻辑（核心：下单/实际数量列居中对齐）
-      exportHeaders = ['食材名称', '标记', '备注', '规格', '单位', '下单数量', '实际数量'];
-      fileName = `跟车单_配送日期_${selectedDate.value}_食堂名称_${selectedCanteen.value}.xlsx`;
-      
-      // 组装跟车单数据
-      const titleRow = [`【${selectedCanteen.value}】跟车单（配送日期：${selectedDate.value}）`];
-      const headerRow = exportHeaders;
-      const dataRows = filteredExcelData.value.map(row => {
-        const actualQty = row.实际增减补 ? row.实际增减补 : row.原始数量;
-        return [
-          row.食材名称,
-          '', // 标记列
-          row.订单备注,
-          row.规格,
-          row.单位,
-          row.原始数量, // 下单数量（居中）
-          actualQty     // 实际数量（居中）
-        ];
-      });
-      
-      const excelData = [titleRow, headerRow, ...dataRows];
-      worksheet = XLSX.utils.aoa_to_sheet(excelData);
-      
-      // 1. 合并第一行7列
-      worksheet['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 6 } }];
-      // 2. 标题居中+加粗
-      if (worksheet['A1']) {
-        worksheet['A1'].s = {
-          alignment: { horizontal: 'center', vertical: 'center' },
-          font: { bold: true, size: 12 }
-        };
+    // 1. 组装传给后端的参数
+    const postData = {
+      selectedDate: selectedDate.value,
+      selectedCanteen: selectedCanteen.value,
+      selectedCategory: selectedCategory.value,
+      exportType: exportType.value,
+      excelData: filteredExcelData.value
+    };
+
+    // 2. 调用后端导出接口（使用动态配置 + 健壮性优化）
+    const response = await axios.post(
+      `${API_BASE_URL}/api/orders/export-excel/`,
+      postData,
+      {
+        responseType: 'blob', // 必须指定为blob，否则文件流乱码
+        headers: { 'Content-Type': 'application/json' },
+        timeout: requestConfig.timeout, // 使用通用超时配置
+        withCredentials: requestConfig.withCredentials, // 携带Cookie
+        crossDomain: requestConfig.crossDomain // 允许跨域
       }
-
-      // ========== 核心：精准控制列对齐 ==========
-      const range = XLSX.utils.decode_range(worksheet['!ref']);
-      for (let r = 1; r <= range.e.r; r++) { // 从表头行（第2行）开始遍历
-        // 1. 下单数量列（第6列，索引5）：强制居中对齐
-        const orderQtyCell = XLSX.utils.encode_cell({ r: r, c: 5 });
-        if (!worksheet[orderQtyCell]) worksheet[orderQtyCell] = { v: '' };
-        worksheet[orderQtyCell].s = {
-          ...worksheet[orderQtyCell].s,
-          alignment: { horizontal: 'center' } // 居中
-        };
-
-        // 2. 实际数量列（第7列，索引6）：强制居中对齐（无论是否填写值）
-        const actualQtyCell = XLSX.utils.encode_cell({ r: r, c: 6 });
-        if (!worksheet[actualQtyCell]) worksheet[actualQtyCell] = { v: '' };
-        worksheet[actualQtyCell].s = {
-          ...worksheet[actualQtyCell].s,
-          alignment: { horizontal: 'center' } // 居中
-        };
-      }
-
-      // 3. 列宽保持不变
-      worksheet['!cols'] = [
-        { wch: 18 }, { wch: 8 }, { wch: 25 }, 
-        { wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 12 }
-      ];
-    }
-
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(
-      workbook, 
-      worksheet, 
-      exportType.value === 'supplier' ? '供货商数据' : '跟车单数据'
     );
-    // 关键：保留单元格样式，确保对齐生效
-    XLSX.writeFile(workbook, fileName, { cellStyles: true });
 
+    // 3. 处理文件流并下载
+    const blob = new Blob([response.data], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = downloadUrl;
+    
+    // 获取文件名（优先取后端返回的，兜底用默认名）
+    let fileName = '订单数据.xlsx';
+    const contentDisposition = response.headers['content-disposition'];
+    if (contentDisposition) {
+      fileName = decodeURIComponent(
+        contentDisposition.split('filename="')[1].split('"')[0]
+      );
+    }
+    a.download = fileName;
+    a.click();
+    
+    // 释放临时URL，避免内存泄漏
+    window.URL.revokeObjectURL(downloadUrl);
     ElMessage.success(`下载成功！文件名为：${fileName}`);
+
   } catch (error) {
-    console.error('Excel下载失败：', error);
-    ElMessage.error('下载失败，请重试！');
+    console.error('【下载失败详情】', error); // 打印下载失败详情
+    // 分场景提示错误
+    if (error.code === 'ECONNABORTED') {
+      ElMessage.error('下载超时！生成Excel文件时间较长，请稍后重试');
+    } else if (error.response?.status === 404) {
+      ElMessage.error('导出接口未找到！请检查后端接口路径是否为 /api/orders/export-excel/');
+    } else {
+      const errorMsg = error.response?.data || '后端导出接口异常，请检查服务是否运行';
+      ElMessage.error(`下载失败：${errorMsg}`);
+    }
   }
 };
+
 // 清空筛选条件
 const resetFilter = () => {
   selectedDate.value = '';
