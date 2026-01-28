@@ -78,10 +78,10 @@
 </template>
 
 <script setup>
-import { ref, watch, defineProps, defineEmits, defineModel } from 'vue'
+import { ref, watch, defineProps, defineEmits, defineModel, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus, Minus } from '@element-plus/icons-vue'
-// 引入API获取类别数据（用于重复校验）
+// 引入API（工具层已处理缓存+加载状态）
 import { getCategories } from '@/utils/storageHandler'
 
 // 接收父组件参数
@@ -104,7 +104,7 @@ const dialogVisible = defineModel()
 // 向父组件传递事件
 const emit = defineEmits(['save', 'delete', 'close'])
 
-// 组件内局部状态（避免直接修改父组件数据）
+// 组件内局部状态
 const localCategoryName = ref(props.categoryName)
 const localFoodList = ref([...props.foodList])
 const categoryList = ref([])
@@ -115,7 +115,7 @@ watch([() => props.categoryName, () => props.foodList], () => {
   localFoodList.value = [...props.foodList]
 })
 
-// 页面挂载加载类别数据（用于重复校验）
+// 加载类别数据（工具层已处理缓存，组件层仅需调用）
 const loadCategories = async () => {
   try {
     const res = await getCategories()
@@ -125,10 +125,15 @@ const loadCategories = async () => {
       foods: item.foods.map(f => f.name)
     }))
   } catch (error) {
+    console.error('❌ CategoryDialog 加载类别数据失败：', error);
     categoryList.value = []
   }
 }
-loadCategories()
+
+// 组件挂载时加载（工具层自动缓存，无需重复请求）
+onMounted(() => {
+  loadCategories();
+})
 
 // 添加食品
 const addFood = () => {
@@ -189,8 +194,8 @@ const getDuplicateTip = (food, currentIdx) => {
   return ''
 }
 
-// 保存表单（向父组件传递数据）
-const handleSave = () => {
+// 保存表单（工具层已自动清空缓存，无需手动刷新）
+const handleSave = async () => {
   const trimName = localCategoryName.value.trim()
   const validFoods = localFoodList.value.map(f => f.trim()).filter(f => f)
   const uniqueValidFoods = [...new Set(validFoods)]

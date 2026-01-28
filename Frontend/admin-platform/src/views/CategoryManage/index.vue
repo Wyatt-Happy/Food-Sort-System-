@@ -11,7 +11,9 @@
         <span class="category-icon-name">{{ category.name }}</span>
         <span class="category-icon-count">{{ getFoodCount(category) }}种</span>
       </div>
-      <div v-if="!categoryList.length" class="empty-tip">暂无类别，点击右下角+添加</div>
+      <div v-if="!categoryList.length && !isLoading" class="empty-tip">暂无类别，点击右下角+添加</div>
+      <!-- 加载中提示 -->
+      <div v-if="isLoading" class="empty-tip">加载类别数据中...</div>
     </div>
 
     <!-- 悬浮新增按钮 -->
@@ -38,7 +40,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 // 引入弹窗组件
 import CategoryDialog from '@/components/CategoryDialog.vue'
-// 引入API
+// 引入API（工具层已处理缓存+自动清空）
 import { getCategories, createCategory, updateCategory, deleteCategory } from '@/utils/storageHandler'
 
 // 响应式数据
@@ -47,15 +49,19 @@ const showDialog = ref(false)
 const editingCategoryId = ref(null)
 const categoryName = ref('')
 const foodList = ref([''])
+// 仅保留加载状态用于UI提示（工具层已防重复请求）
+const isLoading = ref(false)
 
 // 页面挂载加载数据
 onMounted(async () => {
   await loadCategories()
 })
 
-// 加载类别数据
+// 加载类别数据（工具层已缓存，仅需调用+UI加载状态）
 const loadCategories = async () => {
+  isLoading.value = true;
   try {
+    // 工具层自动返回缓存/发起请求，无需手动判断
     const res = await getCategories()
     categoryList.value = res.map(item => ({
       id: item.id,
@@ -65,6 +71,8 @@ const loadCategories = async () => {
   } catch (error) {
     ElMessage.error(`加载类别失败：${error.message}`)
     categoryList.value = []
+  } finally {
+    isLoading.value = false;
   }
 }
 
@@ -89,7 +97,7 @@ const resetForm = () => {
   editingCategoryId.value = null
 }
 
-// 保存类别（新增/编辑）
+// 保存类别（工具层已自动清空缓存，无需手动刷新）
 const handleSaveCategory = async (formData) => {
   try {
     if (editingCategoryId.value) {
@@ -101,6 +109,7 @@ const handleSaveCategory = async (formData) => {
       await createCategory(formData)
       ElMessage.success('类别新增成功！')
     }
+    // 重新加载数据（工具层缓存已清空，会自动请求最新数据）
     await loadCategories()
     showDialog.value = false
   } catch (error) {
@@ -119,6 +128,7 @@ const handleDeleteCategory = async () => {
       { type: 'warning' }
     )
     await deleteCategory(editingCategoryId.value)
+    // 重新加载数据（工具层缓存已清空）
     await loadCategories()
     showDialog.value = false
     ElMessage.success('类别删除成功！')

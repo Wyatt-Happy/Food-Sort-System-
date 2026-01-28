@@ -4,17 +4,21 @@ FROM python:3.10-slim
 # 设置工作目录（容器内对应Backend目录）
 WORKDIR /app
 
-# 安装系统依赖（SQLite无需额外依赖，仅装基础编译工具）
+# 安装系统依赖（新增：中文字体+PDF生成依赖，保留原有gcc）
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
+    fontconfig \
+    fonts-wqy-microhei \  # 安装中文字体（解决PDF中文显示）
     && rm -rf /var/lib/apt/lists/*
 
 # 禁用Python缓存、输出缓冲（方便看日志）
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# 生成requirements.txt（自动导出当前项目依赖，无需旧电脑手动导出）
-RUN pip install django==4.2.10 djangorestframework corsheaders -i https://pypi.tuna.tsinghua.edu.cn/simple
+# 安装依赖（保留原有Django版本，新增PDF/Excel相关依赖，仍用清华源）
+RUN pip install django==4.2.10 djangorestframework corsheaders \
+    reportlab>=4.0.0 openpyxl>=3.1.0 \  # PDF生成+Excel解析依赖
+    -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 # 拷贝后端所有代码（包含category、food_sort_system、db.sqlite3）
 COPY . .
