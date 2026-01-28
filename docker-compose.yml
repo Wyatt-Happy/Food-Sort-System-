@@ -1,51 +1,45 @@
-version: '3.8'
-
 services:
-  # Django后端服务（适配PDF导出+中文字体）
+  # Django后端服务（适配Python 3.10.10）
   backend:
-    build: ./Backend  # 指向你的Backend目录（内含修改后的Dockerfile）
+    build: ./Backend
     container_name: django_food_backend
     restart: always
     ports:
-      - "8000:8000"  # 本地访问后端端口（和你旧电脑一致）
+      - "8000:8000"
     volumes:
-      - ./Backend:/app  # 挂载本地代码，实时同步修改
-      - ./Backend/db.sqlite3:/app/db.sqlite3  # 持久化SQLite数据库，删容器不丢数据
+      - ./Backend:/app
+      - ./Backend/db.sqlite3:/app/db.sqlite3
     environment:
-      # 解决跨域：允许前端容器/本地前端访问后端
       - CORS_ALLOW_ALL_ORIGINS=True
       - DEBUG=True
     networks:
       - food_system_network
-    # 健康检查：确保后端启动完成后前端再访问
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/category/categories/"]
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/api/category/categories/')"]
       interval: 10s
       timeout: 5s
       retries: 3
 
-  # Vue前端服务（适配你的vite.config.js+PDF下载）
+  # Vue前端服务（适配Node 20.20.0）
   frontend:
-    build: ./Frontend/admin_platform  # 指向你的前端目录（内含修改后的Dockerfile）
+    build: ./Frontend/admin-platform
     container_name: vue_food_frontend
     restart: always
     ports:
-      - "5174:5174"  # 本地访问前端端口（和你旧电脑一致）
-      - "5175:5174"  # 可选：远程访问端口（其他设备用新电脑IP:5175访问）
+      - "5174:5174"
+      - "5175:5174"
     volumes:
-      - ./Frontend/admin_platform:/app  # 挂载本地前端代码，实时同步
-      - /app/node_modules  # 隔离node_modules，避免本地依赖冲突
+      - ./Frontend/admin-platform:/app
+      - /app/node_modules
     networks:
       - food_system_network
     depends_on:
-      - backend  # 后端启动后再启动前端
-    # 启动命令：适配你的vite.config.js，支持0.0.0.0访问+多模式
+      backend:
+        condition: service_healthy
     command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5174"]
     environment:
-      # 关键：容器内前端访问后端的地址（用Docker服务名互通）
       - VITE_API_BASE_URL=http://backend:8000
 
-# 自定义网络：前后端容器互通，避免端口冲突
 networks:
   food_system_network:
     driver: bridge

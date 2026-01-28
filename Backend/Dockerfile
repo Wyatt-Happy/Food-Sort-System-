@@ -1,30 +1,18 @@
-# 匹配Django 4.2.10兼容的Python版本（3.9+）
 FROM python:3.10-slim
-
-# 设置工作目录（容器内对应Backend目录）
 WORKDIR /app
-
-# 安装系统依赖（新增：中文字体+PDF生成依赖，保留原有gcc）
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN echo "deb http://mirrors.tuna.tsinghua.edu.cn/debian/ bullseye main contrib non-free" > /etc/apt/sources.list && \
+    echo "deb http://mirrors.tuna.tsinghua.edu.cn/debian/ bullseye-updates main contrib non-free" >> /etc/apt/sources.list && \
+    apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     fontconfig \
-    fonts-wqy-microhei \  # 安装中文字体（解决PDF中文显示）
+    fonts-wqy-microhei \
     && rm -rf /var/lib/apt/lists/*
-
-# 禁用Python缓存、输出缓冲（方便看日志）
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
-
-# 安装依赖（保留原有Django版本，新增PDF/Excel相关依赖，仍用清华源）
-RUN pip install django==4.2.10 djangorestframework corsheaders \
-    reportlab>=4.0.0 openpyxl>=3.1.0 \  # PDF生成+Excel解析依赖
+RUN pip install --upgrade pip && \
+    pip install django==4.2.10 djangorestframework django-cors-headers \
+    reportlab>=4.0.0 openpyxl>=3.1.0 requests \
     -i https://pypi.tuna.tsinghua.edu.cn/simple
-
-# 拷贝后端所有代码（包含category、food_sort_system、db.sqlite3）
 COPY . .
-
-# 暴露Django默认端口（和你旧电脑一致）
 EXPOSE 8000
-
-# 启动Django（适配0.0.0.0，允许容器外访问）
 CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]

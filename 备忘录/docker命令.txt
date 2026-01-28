@@ -1,0 +1,16 @@
+# 1. 构建并启动所有容器（首次启动必须加 --build，后续可省略）
+docker-compose up --build -d
+
+# 2. 查看容器运行状态（确认前后端都处于 Up 状态）
+docker-compose ps
+
+# （可选）查看日志，排查启动异常（若访问失败时执行）
+# 查看后端日志
+docker-compose logs -f backend
+# 查看前端日志
+docker-compose logs -f frontend
+
+#启动前端
+npm run dev:remote
+#启动后端
+python manage.py runserver 0.0.0.0:8000
