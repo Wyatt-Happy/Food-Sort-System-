@@ -94,6 +94,15 @@
             >
               下载PDF
             </el-button>
+            <!-- 新增：下载Excel按钮 -->
+            <el-button 
+              type="success" 
+              @click="handleFilterAndDownloadExcel"
+              :disabled="!canDownload"
+              style="margin-left: 10px;"
+            >
+              下载Excel
+            </el-button>
             <el-button 
               @click="resetFilter" 
               style="margin-left: 10px;"
@@ -140,7 +149,7 @@
           :cell-style="{padding: '2px 0'}"
           style="width: 100%;"
         >
-          <el-table-column prop="学校名称" label="学校名称" align="center" min-width="100"></el-table-column>
+          <!-- 已删除【学校名称】列 -->
           <el-table-column prop="食堂名称" label="食堂名称" align="center" min-width="100"></el-table-column>
           <el-table-column prop="配送日期" label="配送日期" align="center" min-width="100"></el-table-column>
           <el-table-column prop="食材类别" label="食材类别" align="center" min-width="100"></el-table-column>
@@ -204,7 +213,7 @@ import {
   formatExcelData, 
   checkFoodMapping, 
   extractAndProcessDeliveryDate,
-  getExportData 
+  getExportData // 引入工具层的导出数据处理函数
 } from '@/utils/excelHandler';
 // 导入动态接口配置（修复：兜底默认值，避免未定义）
 import { getApiBaseUrl } from '@/utils/apiConfig.js';
@@ -215,7 +224,8 @@ const router = useRouter();
 // 核心：动态获取后端地址（替换硬编码）
 const API_BASE_URL = getApiBaseUrl() || 'http://localhost:8000';
 console.log('【OrderManage - 后端基础地址】', API_BASE_URL); 
-console.log('【OrderManage - 导出接口地址】', `${API_BASE_URL}/api/orders/export-excel/`);
+console.log('【OrderManage - PDF导出接口地址】', `${API_BASE_URL}/api/orders/export-excel/`);
+console.log('【OrderManage - Excel导出接口地址】', `${API_BASE_URL}/api/orders/export-excel-file/`);
 
 // 修复：定义默认请求配置，避免未定义报错
 const requestConfig = {
@@ -417,7 +427,7 @@ const filterExcelData = () => {
   filteredExcelData.value = filtered;
 };
 
-// 核心修改：调用后端接口下载PDF文件
+// 核心：调用后端接口下载PDF文件（整合工具层getExportData）
 const handleFilterAndDownload = async () => {
   if (!canDownload.value) {
     if (!uploadFile.value) ElMessage.warning('请先上传Excel数据！');
@@ -434,19 +444,17 @@ const handleFilterAndDownload = async () => {
 
   try {
     ElMessage.info('正在生成PDF文件，请稍等...');
-    console.log('【开始下载】请求地址：', `${API_BASE_URL}/api/orders/export-excel/`);
+    console.log('【开始下载PDF】请求地址：', `${API_BASE_URL}/api/orders/export-excel/`);
     
-    // 组装参数（修复：中文属性名用[]访问）
+    // 核心优化：使用工具层的getExportData统一处理数据
+    const exportData = getExportData(filteredExcelData.value, exportType.value);
+    // 组装参数
     const postData = {
       selectedDate: selectedDate.value,
       selectedCanteen: selectedCanteen.value,
       selectedCategory: selectedCategory.value,
       exportType: exportType.value,
-      excelData: filteredExcelData.value.map(item => ({
-        ...item,
-        '实际增减补': item['实际增减补'] || '',
-        '食材类别': item['食材类别'] || ''
-      }))
+      excelData: exportData
     };
 
     // 调用后端导出接口
@@ -503,14 +511,110 @@ const handleFilterAndDownload = async () => {
     ElMessage.success(`PDF下载成功！文件名为：${fileName}`);
 
   } catch (error) {
-    console.error('【下载失败详情】', error);
+    console.error('【PDF下载失败详情】', error);
     if (error.code === 'ECONNABORTED') {
       ElMessage.error('下载超时！生成PDF文件时间较长，请稍后重试');
     } else if (error.response?.status === 404) {
       ElMessage.error('导出接口未找到！请检查后端接口路径是否为 /api/orders/export-excel/');
     } else {
       const errorMsg = error.response?.data || '后端导出接口异常，请检查服务是否运行';
-      ElMessage.error(`下载失败：${errorMsg}`);
+      ElMessage.error(`PDF下载失败：${errorMsg}`);
+    }
+  }
+};
+
+// 新增：调用后端接口下载Excel文件（逻辑与PDF一致，复用工具层数据处理）
+const handleFilterAndDownloadExcel = async () => {
+  if (!canDownload.value) {
+    if (!uploadFile.value) ElMessage.warning('请先上传Excel数据！');
+    else if (!selectedDate.value) ElMessage.warning('请选择配送日期！');
+    else if (exportType.value === 'follower' && selectedCanteen.value === 'none') ElMessage.warning('跟车单导出必须选择具体食堂名称（不能选“无”）！');
+    else if (exportType.value === 'supplier' && selectedCategory.value === 'none') ElMessage.warning('供货商单导出必须选择具体食材类别（不能选“无”）！');
+    return;
+  }
+
+  if (filteredExcelData.value.length === 0) {
+    ElMessage.warning('暂无匹配数据，无法下载！');
+    return;
+  }
+
+  try {
+    ElMessage.info('正在生成Excel文件，请稍等...');
+    console.log('【开始下载Excel】请求地址：', `${API_BASE_URL}/api/orders/export-excel-file/`);
+    
+    // 复用工具层的getExportData统一处理数据
+    const exportData = getExportData(filteredExcelData.value, exportType.value);
+    // 组装参数（与PDF完全一致）
+    const postData = {
+      selectedDate: selectedDate.value,
+      selectedCanteen: selectedCanteen.value,
+      selectedCategory: selectedCategory.value,
+      exportType: exportType.value,
+      excelData: exportData
+    };
+
+    // 调用后端Excel导出接口
+    const response = await axios.post(
+      `${API_BASE_URL}/api/orders/export-excel-file/`,
+      postData,
+      {
+        responseType: 'blob',
+        headers: { 'Content-Type': 'application/json' },
+        timeout: requestConfig.timeout,
+        withCredentials: requestConfig.withCredentials,
+        crossDomain: requestConfig.crossDomain
+      }
+    );
+
+    // 处理Excel文件流并下载
+    const blob = new Blob([response.data], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = downloadUrl;
+    
+    // 解析文件名（与PDF逻辑一致）
+    let fileName = '';
+    const contentDisposition = response.headers['content-disposition'];
+    if (contentDisposition) {
+      const filenameMatch = contentDisposition.match(/filename\*=utf-8''(.*)/);
+      if (filenameMatch && filenameMatch[1]) {
+        fileName = decodeURIComponent(filenameMatch[1]);
+      } else {
+        const oldFilenameMatch = contentDisposition.match(/filename="(.*)"/);
+        if (oldFilenameMatch && oldFilenameMatch[1]) {
+          fileName = decodeURIComponent(oldFilenameMatch[1]);
+        }
+      }
+    }
+
+    // 兜底逻辑：前端生成文件名
+    if (!fileName) {
+      if (exportType.value === 'supplier') {
+        const categoryName = selectedCategory.value !== 'none' ? selectedCategory.value : '全部';
+        fileName = `供货商单_${selectedDate.value}_${categoryName}.xlsx`;
+      } else {
+        fileName = `跟车单_${selectedDate.value}_${selectedCanteen.value}.xlsx`;
+      }
+    }
+
+    a.download = fileName;
+    a.click();
+    
+    // 释放临时URL
+    window.URL.revokeObjectURL(downloadUrl);
+    ElMessage.success(`Excel下载成功！文件名为：${fileName}`);
+
+  } catch (error) {
+    console.error('【Excel下载失败详情】', error);
+    if (error.code === 'ECONNABORTED') {
+      ElMessage.error('下载超时！生成Excel文件时间较长，请稍后重试');
+    } else if (error.response?.status === 404) {
+      ElMessage.error('Excel导出接口未找到！请检查后端接口路径是否为 /api/orders/export-excel-file/');
+    } else {
+      const errorMsg = error.response?.data || '后端Excel导出接口异常，请检查服务是否运行';
+      ElMessage.error(`Excel下载失败：${errorMsg}`);
     }
   }
 };

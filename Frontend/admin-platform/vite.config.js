@@ -6,16 +6,14 @@ import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 import path from 'path'
 
 export default defineConfig(({ mode }) => {
-  // 核心优化：优先读取环境变量（Docker模式），再按mode适配
-  // 1. Docker环境变量（容器内优先）：VITE_API_BASE_URL=http://backend:8000
-  // 2. 本地模式：remote=cpolar穿透，其他=Docker后端（兼容你的原有逻辑）
+  // 核心修改：替换为最新的后端cpolar域名
   const proxyTarget = process.env.VITE_API_BASE_URL || 
-                      (mode === 'remote' ? 'http://3f7748e1.r10.cpolar.top' : 'http://backend:8000');
+                      (mode === 'remote' ? 'http://4f75eb32.r10.cpolar.top' : 'http://backend:8000');
 
-  // 动态设置Host头：仅remote模式用cpolar域名，其他模式自动适配
+  // 核心修改：替换为最新的后端cpolar域名
   const proxyHeaders = {};
   if (mode === 'remote') {
-    proxyHeaders['Host'] = '3f7748e1.r10.cpolar.top';
+    proxyHeaders['Host'] = '4f75eb32.r10.cpolar.top';
   }
 
   return {
@@ -31,7 +29,8 @@ export default defineConfig(({ mode }) => {
       port: 5174,
       open: true,
       host: '0.0.0.0', // 保留：支持本地+远程访问
-      allowedHosts: ['16d0a48d.r10.cpolar.top', 'localhost', '127.0.0.1', 'backend'], // 新增：允许Docker服务名
+      // 核心修改：替换为最新的前端cpolar域名
+      allowedHosts: ['1821c9ea.r10.cpolar.top', 'localhost', '127.0.0.1', 'backend'], 
       cors: true, // 保留：解决前端跨域
       hmr: {
         host: 'localhost',

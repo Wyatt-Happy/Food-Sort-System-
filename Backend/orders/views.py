@@ -4,10 +4,13 @@ from django.views.decorators.http import require_POST
 import json
 import re
 import io
-# 仅保留核心兼容逻辑，简化判断避免崩溃
 import platform
+from urllib.parse import quote  # 处理中文文件名
 
-# 关键：注册系统字体解决中文显示问题
+# 新增：Excel生成依赖
+import xlsxwriter
+
+# PDF相关依赖（保留）
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
@@ -17,24 +20,20 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib import colors
 from reportlab.lib.units import cm
 
-# 全局配置：PDF样式参数（兼容Windows/Docker Linux + 无蓝色样式）
+# 全局配置：PDF样式参数（保留）
 MAIN_FONT = 'SimHei'  # 默认字体名
-# 简化字体注册逻辑：优先Windows，失败则跳过（不影响网页加载）
 try:
     system_type = platform.system()
     if system_type == 'Windows':
-        # Windows本地：注册系统黑体（原路径）
         pdfmetrics.registerFont(TTFont('SimHei', 'C:\\Windows\\Fonts\\simhei.ttf'))
         print("【本地调试】已加载Windows SimHei字体")
     elif system_type == 'Linux':
-        # Docker容器：注册文泉驿微米黑
         pdfmetrics.registerFont(TTFont('SimHei', '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc'))
         print("【容器调试】已加载Linux WenQuanYiMicroHei字体")
-    # 异常仅打印日志，不修改MAIN_FONT（避免网页崩溃）
 except Exception as e:
     print(f"【字体警告】注册失败：{e}，使用默认字体（不影响网页访问）")
 
-# PDF样式常量（与原代码一致）
+# PDF样式常量（保留）
 FONT_SIZE = 10
 HEADER_FONT_SIZE = 12
 TABLE_PADDING = 8
@@ -42,12 +41,76 @@ MARGIN = 2 * cm
 BORDER_WIDTH = 1.5
 
 
-# 订单PDF导出接口（核心逻辑与原代码一致，仅改样式）
+# ========== 复用逻辑：提取数据处理函数（最终版逻辑） ==========
+def process_export_data(params):
+    """
+    统一处理导出数据（PDF/Excel共用）
+    :param params: 请求参数
+    :return: (table_headers, table_data, filename)
+    """
+    selected_date = params.get('selectedDate', '')
+    selected_canteen = params.get('selectedCanteen', '')
+    selected_category = params.get('selectedCategory', '')
+    export_type = params.get('exportType', '')
+    excel_data = params.get('excelData', [])
+
+    table_headers = []
+    table_data = []
+    filename = ""
+
+    # 供货商单逻辑：填了用用户值，没填用原始值
+    if export_type == 'supplier':
+        # 表头
+        table_headers = ['食堂名称', '食材类别', '食材名称', '规格', '单位', '数量', '订单备注']
+        # 数据行
+        for row in excel_data:
+            final_qty = row.get('数量', row.get('原始数量', ''))
+            canteen_name = re.sub(r'三河市', '', str(row.get('食堂名称', '')))
+            table_data.append([
+                str(canteen_name),
+                str(row.get('食材类别', '')),
+                str(row.get('食材名称', '')),
+                str(row.get('规格', '')),
+                str(row.get('单位', '')),
+                str(final_qty),
+                str(row.get('订单备注', ''))
+            ])
+        # 文件名
+        category_name = selected_category if selected_category != 'none' else '全部'
+        filename = f'供货商单_{selected_date}_{category_name}.xlsx'
+
+    # 跟车单逻辑：下单数量=原表值，实际数量=填显值/未填显空
+    elif export_type == 'follower':
+        # 表头
+        table_headers = ['食材名称', '标记', '备注', '规格', '单位', '下单数量', '实际数量']
+        # 数据行
+        for row in excel_data:
+            # 固定：下单数量=原表原始数量
+            original_qty = str(row.get('原始数量', '')) if row.get('原始数量') else ''
+            # 固定：实际数量=用户填写值（有值显值，无值显空）
+            actual_qty = str(row.get('实际数量', '')) if row.get('实际数量') else ''
+            
+            table_data.append([
+                str(row.get('食材名称', '')),
+                '',  # 标记列固定空
+                str(row.get('订单备注', '')),
+                str(row.get('规格', '')),
+                str(row.get('单位', '')),
+                original_qty,  # 下单数量
+                actual_qty     # 实际数量（填显值/未填显空）
+            ])
+        # 文件名
+        filename = f'跟车单_{selected_date}_{selected_canteen}.xlsx'
+
+    return table_headers, table_data, filename
+
+
+# ========== PDF导出接口（最终版） ==========
 @csrf_exempt
 @require_POST
 def export_order_excel(request):
     try:
-        # 1. 接收参数并容错（原逻辑不变）
+        # 1. 接收参数并容错
         params = json.loads(request.body or '{}')
         selected_date = params.get('selectedDate', '')
         selected_canteen = params.get('selectedCanteen', '')
@@ -55,11 +118,11 @@ def export_order_excel(request):
         export_type = params.get('exportType', '')
         excel_data = params.get('excelData', [])
 
-        # 参数校验（原逻辑不变）
+        # 参数校验
         if not excel_data or not export_type or not selected_date:
             return HttpResponse('缺少必要参数', status=400)
 
-        # 2. 初始化PDF文档（原逻辑不变）
+        # 2. 初始化PDF文档
         buffer = io.BytesIO()
         doc = SimpleDocTemplate(
             buffer,
@@ -70,27 +133,24 @@ def export_order_excel(request):
             bottomMargin=MARGIN
         )
 
-        # 3. 定义PDF样式（无蓝色，文字全黑）
+        # 3. 定义PDF样式
         styles = getSampleStyleSheet()
-        # 标题样式：黑色文字，居中
         title_style = ParagraphStyle(
             name='TitleStyle',
             fontName=MAIN_FONT,
             fontSize=HEADER_FONT_SIZE + 2,
             alignment=1,
-            textColor=colors.black,  # 取消蓝色
+            textColor=colors.black,
             spaceAfter=15
         )
-        # 表头样式：黑色文字，加粗
         header_style = ParagraphStyle(
             name='HeaderStyle',
             fontName=MAIN_FONT,
             fontSize=HEADER_FONT_SIZE,
             alignment=1,
-            textColor=colors.black,  # 取消白色
+            textColor=colors.black,
             bold=True
         )
-        # 内容样式：黑色文字
         content_style = ParagraphStyle(
             name='ContentStyle',
             fontName=MAIN_FONT,
@@ -99,79 +159,51 @@ def export_order_excel(request):
             textColor=colors.black
         )
 
-        # 4. 构建PDF内容（原业务逻辑完全不变）
+        # 4. 构建PDF内容
         elements = []
         table_data = []
         filename = ""
 
-        # 4.1 供货商单逻辑（原逻辑不变）
+        # 复用数据处理逻辑
         if export_type == 'supplier':
             title_text = f"供货商单（配送日期：{selected_date}，食材类别：{selected_category}）"
             elements.append(Paragraph(title_text, title_style))
             elements.append(Spacer(1, 15))
-
-            headers = ['学校名称', '食堂名称', '配送日期', '食材类别', '食材名称', '规格', '单位', '数量', '订单备注']
+            headers = ['食堂名称', '食材类别', '食材名称', '规格', '单位', '数量', '订单备注']
             table_data.append([Paragraph(h, header_style) for h in headers])
+            
+            # 处理数据行
+            processed_headers, processed_rows, filename = process_export_data(params)
+            for row in processed_rows:
+                table_data.append([Paragraph(cell, content_style) for cell in row])
+            filename = filename.replace('.xlsx', '.pdf')
 
-            for row in excel_data:
-                final_qty = row.get('实际增减补') or row.get('原始数量') or ''
-                school_name = re.sub(r'三河市', '', str(row.get('学校名称', '')))
-                canteen_name = re.sub(r'三河市', '', str(row.get('食堂名称', '')))
-
-                row_data = [
-                    Paragraph(str(school_name), content_style),
-                    Paragraph(str(canteen_name), content_style),
-                    Paragraph(str(row.get('配送日期', '')), content_style),
-                    Paragraph(str(row.get('食材类别', '')), content_style),
-                    Paragraph(str(row.get('食材名称', '')), content_style),
-                    Paragraph(str(row.get('规格', '')), content_style),
-                    Paragraph(str(row.get('单位', '')), content_style),
-                    Paragraph(str(final_qty), content_style),
-                    Paragraph(str(row.get('订单备注', '')), content_style)
-                ]
-                table_data.append(row_data)
-
-            category_name = selected_category if selected_category != 'none' else '全部'
-            filename = f'供货商单_{selected_date}_{category_name}.pdf'
-
-        # 4.2 跟车单逻辑（原逻辑不变）
         elif export_type == 'follower':
             title_text = f"跟车单（配送日期：{selected_date}，食堂名称：{selected_canteen}）"
             elements.append(Paragraph(title_text, title_style))
             elements.append(Spacer(1, 15))
-
             headers = ['食材名称', '标记', '备注', '规格', '单位', '下单数量', '实际数量']
             table_data.append([Paragraph(h, header_style) for h in headers])
+            
+            # 处理数据行
+            processed_headers, processed_rows, filename = process_export_data(params)
+            for row in processed_rows:
+                table_data.append([Paragraph(cell, content_style) for cell in row])
+            filename = filename.replace('.xlsx', '.pdf')
 
-            for row in excel_data:
-                actual_qty = row.get('实际增减补') or row.get('原始数量') or ''
-
-                row_data = [
-                    Paragraph(str(row.get('食材名称', '')), content_style),
-                    Paragraph('', content_style),
-                    Paragraph(str(row.get('订单备注', '')), content_style),
-                    Paragraph(str(row.get('规格', '')), content_style),
-                    Paragraph(str(row.get('单位', '')), content_style),
-                    Paragraph(str(row.get('原始数量', '')), content_style),
-                    Paragraph(str(actual_qty), content_style)
-                ]
-                table_data.append(row_data)
-
-            filename = f'跟车单_{selected_date}_{selected_canteen}.pdf'
-
-        # 5. 生成表格（无蓝色背景、无隔行变色）
+        # 5. 生成表格
         if not table_data:
             return HttpResponse('无数据可导出', status=400)
 
-        # 适配列宽（原逻辑不变）
+        # 适配列宽
         col_widths = []
         if export_type == 'supplier':
-            col_widths = [2.2 * cm, 2.2 * cm, 2 * cm, 2 * cm, 2.5 * cm, 1.8 * cm, 1.5 * cm, 1.5 * cm, 3 * cm]
+            col_widths = [2.2 * cm, 2 * cm, 2.5 * cm, 1.8 * cm, 1.5 * cm, 1.5 * cm, 3 * cm]
         else:
             col_widths = [2.8 * cm, 1.5 * cm, 3 * cm, 2 * cm, 1.5 * cm, 1.8 * cm, 1.8 * cm]
         col_widths = col_widths[:len(table_data[0])]
 
-        # 表格样式：仅保留黑色边框、内边距、对齐（无颜色填充）
+        # 表格样式
         table = Table(table_data, colWidths=col_widths)
         table.setStyle(TableStyle([
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
@@ -187,17 +219,106 @@ def export_order_excel(request):
         ]))
         elements.append(table)
 
-        # 6. 生成PDF文档（原逻辑不变）
+        # 6. 生成PDF文档
         doc.build(elements)
         buffer.seek(0)
 
-        # 7. 返回PDF响应（原逻辑不变）
+        # 7. 返回PDF响应
         response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename*=utf-8\'\'{filename}'
+        response['Content-Disposition'] = f'attachment; filename*=utf-8\'\'{quote(filename)}'
         return response
 
-    # 异常仅返回错误信息，不崩溃（核心修复：保留原异常逻辑）
     except Exception as e:
         error_msg = f'导出PDF失败：{str(e)}，错误类型：{type(e).__name__}'
+        print(error_msg)
+        return HttpResponse(error_msg, status=500)
+
+
+# ========== Excel导出接口（最终版：标题行合并+逻辑修复） ==========
+@csrf_exempt
+@require_POST
+def export_order_excel_file(request):
+    try:
+        # 1. 接收参数并容错
+        params = json.loads(request.body or '{}')
+        selected_date = params.get('selectedDate', '')
+        selected_canteen = params.get('selectedCanteen', '')
+        selected_category = params.get('selectedCategory', '')
+        export_type = params.get('exportType', '')
+        excel_data = params.get('excelData', [])
+
+        # 参数校验
+        if not excel_data or not export_type or not selected_date:
+            return HttpResponse('缺少必要参数', status=400)
+
+        # 2. 初始化Excel缓冲区
+        buffer = io.BytesIO()
+        workbook = xlsxwriter.Workbook(buffer, {'in_memory': True})
+        worksheet = workbook.add_worksheet('导出数据')
+
+        # 3. 设置Excel样式
+        # 标题样式（第一行）
+        title_format = workbook.add_format({
+            'bold': True,
+            'font_size': 14,
+            'align': 'center',
+            'valign': 'vcenter',
+            'bg_color': '#409EFF',
+            'font_color': '#FFFFFF',
+            'border': 1
+        })
+        # 表头样式（第二行）
+        header_format = workbook.add_format({
+            'bold': True,
+            'align': 'center',
+            'valign': 'vcenter',
+            'bg_color': '#f0f0f0',
+            'border': 1
+        })
+        # 内容样式（第三行及以后）
+        content_format = workbook.add_format({
+            'align': 'center',
+            'valign': 'vcenter',
+            'border': 1
+        })
+
+        # 4. 处理导出数据
+        table_headers, table_data, filename = process_export_data(params)
+        
+        # 生成标题文字（和文件名一致）
+        title_text = filename.replace('.xlsx', '')
+        
+        # 5. 第一行：合并单元格+写入标题
+        header_count = len(table_headers)
+        last_col = header_count - 1
+        worksheet.merge_range(0, 0, 0, last_col, title_text, title_format)
+        worksheet.set_row(0, 25)  # 标题行高度
+
+        # 6. 第二行：写入表头
+        worksheet.set_row(1, 20)  # 表头行高度
+        for col, header in enumerate(table_headers):
+            worksheet.write(1, col, header, header_format)
+
+        # 7. 第三行开始：写入数据行
+        for row, row_data in enumerate(table_data, start=2):
+            for col, cell_data in enumerate(row_data):
+                worksheet.write(row, col, cell_data, content_format)
+
+        # 8. 调整列宽
+        column_widths = [15, 12, 20, 12, 8, 10, 20]
+        for col, width in enumerate(column_widths):
+            worksheet.set_column(col, col, width)
+
+        # 9. 关闭工作簿
+        workbook.close()
+        buffer.seek(0)
+
+        # 10. 返回Excel响应
+        response = HttpResponse(buffer.getvalue(), content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        response['Content-Disposition'] = f'attachment; filename*=utf-8\'\'{quote(filename)}'
+        return response
+
+    except Exception as e:
+        error_msg = f'导出Excel失败：{str(e)}，错误类型：{type(e).__name__}'
         print(error_msg)
         return HttpResponse(error_msg, status=500)

@@ -11,7 +11,7 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 RUN pip install --upgrade pip && \
     pip install django==4.2.10 djangorestframework django-cors-headers \
-    reportlab>=4.0.0 openpyxl>=3.1.0 requests \
+    reportlab>=4.0.0 openpyxl>=3.1.0 requests xlsxwriter>=3.1.9 \
     -i https://pypi.tuna.tsinghua.edu.cn/simple
 COPY . .
 EXPOSE 8000

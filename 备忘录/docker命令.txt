@@ -14,3 +14,12 @@ docker-compose logs -f frontend
 npm run dev:remote
 #启动后端
 python manage.py runserver 0.0.0.0:8000
+
+
+
+拉取前端依赖镜像（Node 20-alpine）
+docker pull swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/node:20-alpine
+docker tag swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/node:20-alpine node:20-alpine
+拉取后端依赖镜像（Python 3.10-slim）
+docker pull swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/python:3.10-slim
+docker tag swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/python:3.10-slim python:3.10-slim

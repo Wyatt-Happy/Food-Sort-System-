@@ -25,10 +25,10 @@ SECRET_KEY = 'django-insecure-^0+j2%jr91kwx8sdviw1p++&@^ble7#r*-bhip^9*u!hpbmjv0
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-# ========== 核心修复1：允许所有必要域名（包含HTTPS前端域名） ==========
+# ========== 核心修改：替换为最新的cpolar域名 ==========
 ALLOWED_HOSTS = [
-    "3f7748e1.r10.cpolar.top",  # 后端内网穿透域名（HTTPS/HTTP）
-    "16d0a48d.r10.cpolar.top",  # 前端内网穿透域名（新增！关键）
+    "4f75eb32.r10.cpolar.top",  # 后端新内网穿透域名（替换旧的1b30ab41）
+    "1821c9ea.r10.cpolar.top",  # 前端新内网穿透域名（替换旧的49436143）
     "localhost",
     "127.0.0.1",
     "0.0.0.0",
@@ -127,16 +127,16 @@ STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 
-# ========== 核心修复2：跨域配置（适配HTTPS/HTTP，精准匹配） ==========
+# ========== 核心修改：替换为最新的cpolar域名 ==========
 # 允许携带Cookie（CSRF Token核心）
 CORS_ALLOW_CREDENTIALS = True
 
-# 允许的跨域源（去掉端口！cpolar的HTTPS映射默认用443端口，无需加5174）
+# 允许的跨域源（替换旧域名）
 CORS_ALLOWED_ORIGINS = [
-    "http://16d0a48d.r10.cpolar.top",   # 前端HTTP（无端口）
-    "https://16d0a48d.r10.cpolar.top",  # 前端HTTPS（无端口，新增！关键）
-    "http://3f7748e1.r10.cpolar.top",   # 后端HTTP（无端口）
-    "https://3f7748e1.r10.cpolar.top",  # 后端HTTPS（无端口，新增！关键）
+    "http://1821c9ea.r10.cpolar.top",   # 前端HTTP（新域名，替换旧的49436143）
+    "https://1821c9ea.r10.cpolar.top",  # 前端HTTPS（新域名，替换旧的49436143）
+    "http://4f75eb32.r10.cpolar.top",   # 后端HTTP（新域名，替换旧的1b30ab41）
+    "https://4f75eb32.r10.cpolar.top",  # 后端HTTPS（新域名，替换旧的1b30ab41）
     "http://localhost:5174",
     "http://127.0.0.1:5174",
 ]
@@ -164,13 +164,13 @@ CORS_ALLOW_METHODS = [
     "PATCH",
 ]
 
-# ========== 核心修复3：CSRF配置（适配HTTPS跨域） ==========
-# 1. CSRF信任的源（去掉端口，包含所有HTTPS/HTTP域名）
+# ========== 核心修改：替换为最新的cpolar域名 ==========
+# 1. CSRF信任的源（替换旧域名）
 CSRF_TRUSTED_ORIGINS = [
-    "http://16d0a48d.r10.cpolar.top",   # 前端HTTP（无端口）
-    "https://16d0a48d.r10.cpolar.top",  # 前端HTTPS（无端口，新增！关键）
-    "http://3f7748e1.r10.cpolar.top",   # 后端HTTP（无端口）
-    "https://3f7748e1.r10.cpolar.top",  # 后端HTTPS（无端口，新增！关键）
+    "http://1821c9ea.r10.cpolar.top",   # 前端HTTP（新域名，替换旧的49436143）
+    "https://1821c9ea.r10.cpolar.top",  # 前端HTTPS（新域名，替换旧的49436143）
+    "http://4f75eb32.r10.cpolar.top",   # 后端HTTP（新域名，替换旧的1b30ab41）
+    "https://4f75eb32.r10.cpolar.top",  # 后端HTTPS（新域名，替换旧的1b30ab41）
     "http://localhost:5174",
     "http://127.0.0.1:5174",
 ]

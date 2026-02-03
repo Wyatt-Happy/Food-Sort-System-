@@ -11,10 +11,8 @@ export const getApiBaseUrl = () => {
     // 本地环境仍用HTTP（127.0.0.1无HTTPS）
     baseUrl = 'http://127.0.0.1:8000';
   } else {
-    // 公网环境改为HTTPS，去掉8000端口！
-    baseUrl = 'https://3f7748e1.r10.cpolar.top';
-    // ❌ 原错误：http://3f7748e1.r10.cpolar.top:8000（HTTP+端口）
-    // ✅ 正确：https://3f7748e1.r10.cpolar.top（HTTPS+无端口）
+    // 核心修改：替换为最新的后端HTTPS域名
+    baseUrl = 'https://4f75eb32.r10.cpolar.top';
   }
   
   console.log('【拼接的后端基础地址】', baseUrl);

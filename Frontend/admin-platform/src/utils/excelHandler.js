@@ -8,7 +8,7 @@ export const formatExcelData = (originData, categoryList) => {
     const category = categoryList.find(c => c.foods.some(f => f.trim() === foodName))
 
     return {
-      '学校名称': item['学校名称'] || '',
+      // 已删除「学校名称」字段
       '食堂名称': item['食堂名称'] || '',
       '配送日期': item['配送日期'] || item['日期'] || '',
       '食材名称': item['食材名称'] || '',
@@ -46,13 +46,12 @@ export const extractAndProcessDeliveryDate = (data, dateListRef) => {
   dateListRef.value = dateArray
 }
 
-// 4. 导出数据处理（核心修复：供货商/跟车单导出规则）
+// 4. 导出数据处理（最终版：跟车单纯透传，供货商单保留计算）
 export const getExportData = (filteredData, exportType) => {
   const exportData = []
   for (const row of filteredData) {
-    // 基础数据提取
+    // 基础数据提取：保留原始字段
     const base = {
-      学校名称: row['学校名称'],
       食堂名称: row['食堂名称'],
       配送日期: row['配送日期'],
       食材类别: row['食材类别'],
@@ -60,47 +59,29 @@ export const getExportData = (filteredData, exportType) => {
       规格: row['规格'],
       单位: row['单位'],
       订单备注: row['订单备注'],
-      原始数量: row['原始数量'] || row['数量'], // 导入的原始数量
-      实际增减补: (row['实际增减补'] || '').trim() // 用户填写的增减补
+      原始数量: row['原始数量'] || row['数量'], // 下单数量=原表原始数量
+      实际增减补: (row['实际增减补'] || '').trim() // 用户填写的实际数量，纯字符串透传
     }
 
-    // 1. 供货商导出：仅保留最终数量，无原始/增减补列
+    // 1. 供货商导出：填了用用户值，没填用原始值
     if (exportType === 'supplier') {
       let finalQty = base.原始数量
-      // 有填写实际增减补 → 直接覆盖数量；无填写 → 用导入的原始数量
       if (base.实际增减补) {
         const inputQty = Number(base.实际增减补)
         finalQty = isNaN(inputQty) ? base.原始数量 : inputQty
       }
       exportData.push({
-        学校名称: base.学校名称,
-        食堂名称: base.食堂名称,
-        配送日期: base.配送日期,
-        食材类别: base.食材类别,
-        食材名称: base.食材名称,
-        规格: base.规格,
-        单位: base.单位,
-        数量: finalQty, // 最终唯一数量列
-        订单备注: base.订单备注
+        ...base,
+        数量: finalQty
       })
     }
 
-    // 2. 跟车单导出：下单数量=原始数量，实际数量=原始±增减补（无则为原始）
+    // 2. 跟车单导出：纯透传，不做任何计算（填显值/未填显空）
     else if (exportType === 'follower') {
-      let actualQty = base.原始数量
-      if (base.实际增减补) {
-        const adjustNum = Number(base.实际增减补)
-        if (!isNaN(adjustNum)) actualQty += adjustNum
-      }
-      actualQty = Math.max(0, actualQty) // 确保数量非负
       exportData.push({
-        食材名称: base.食材名称,
-        标记: '', // 空列，用户手工填
-        备注: base.订单备注,
-        规格: base.规格,
-        单位: base.单位,
-        下单数量: base.原始数量, // 导入的原始数量
-        实际数量: actualQty // 填写增减补后的实际数量
+        ...base,
+        下单数量: base.原始数量, // 固定=原表原始数量
+        实际数量: base.实际增减补 // 直接=用户填写值（空/填写值）
       })
     }
   }
